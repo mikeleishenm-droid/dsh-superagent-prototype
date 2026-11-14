@@ -1,6 +1,7 @@
 package tetris.ui;
 
 import tetris.game.Board;
+import tetris.game.ClearResult;
 import tetris.game.Cell;
 import tetris.game.GameEngine;
 import tetris.game.GameState;
@@ -43,9 +44,17 @@ public final class BoardPanel extends JPanel {
         setOpaque(false);
     }
 
-    /** Shows a short message after a line clear. */
-    public void showLineClear(int count) {
-        toastText = count >= 4 ? "TETRIS!" : "消除 " + count + " 行";
+    /** Shows a short message after a line clear, including combo feedback. */
+    public void showLineClear(ClearResult result) {
+        StringBuilder message = new StringBuilder();
+        message.append(result.tetris() ? "TETRIS!" : "消除 " + result.lines() + " 行");
+        if (result.backToBack()) {
+            message.append("  B2B");
+        }
+        if (result.combo() >= 2) {
+            message.append("  COMBO ×").append(result.combo());
+        }
+        toastText = message.toString();
         toastStartedAt = System.nanoTime();
     }
 
@@ -72,8 +81,8 @@ public final class BoardPanel extends JPanel {
 
         g2.setClip(null);
         drawToast(g2);
-        if (engine.state() != GameState.RUNNING) {
-            drawOverlay(g2);
+        if (engine.state() == GameState.PAUSED) {
+            drawPauseOverlay(g2);
         }
 
         g2.setColor(Theme.alpha(Theme.ACCENT, 42));
@@ -151,6 +160,10 @@ public final class BoardPanel extends JPanel {
         int alpha = Math.round(255 * Math.min(1f, (1f - progress) * 1.6f));
         g2.setFont(Theme.font(Font.BOLD, 26));
         FontMetrics metrics = g2.getFontMetrics();
+        if (metrics.stringWidth(toastText) > BOARD_WIDTH - 36) {
+            g2.setFont(Theme.font(Font.BOLD, 19));
+            metrics = g2.getFontMetrics();
+        }
         int x = (BOARD_WIDTH - metrics.stringWidth(toastText)) / 2;
         int y = 92;
 
@@ -160,46 +173,34 @@ public final class BoardPanel extends JPanel {
         g2.drawString(toastText, x, y);
     }
 
-    private void drawOverlay(Graphics2D g2) {
+    private void drawPauseOverlay(Graphics2D g2) {
         g2.setColor(new Color(3, 5, 13, 176));
         g2.fill(new RoundRectangle2D.Double(0, 0, BOARD_WIDTH, BOARD_HEIGHT, CORNER, CORNER));
 
-        boolean paused = engine.state() == GameState.PAUSED;
         int cardWidth = 284;
-        int cardHeight = 156;
+        int cardHeight = 190;
         double cardX = (BOARD_WIDTH - cardWidth) / 2.0;
         double cardY = (BOARD_HEIGHT - cardHeight) / 2.0;
         Theme.drawCard(g2, cardX, cardY, cardWidth, cardHeight);
 
-        g2.setColor(Theme.alpha(paused ? Theme.ACCENT : Theme.DANGER, 190));
+        g2.setColor(Theme.alpha(Theme.ACCENT, 190));
         g2.fill(new RoundRectangle2D.Double(cardX + 24, cardY + 18, 40, 3, 3, 3));
 
-        String title = paused ? "已暂停" : "游戏结束";
-        String hint = paused ? "按 P 继续游戏" : "按 R 重新开始";
         int centerX = BOARD_WIDTH / 2;
+        drawCentered(g2, "已暂停", Theme.font(Font.BOLD, 28), Theme.TEXT, centerX, (int) cardY + 66);
+        drawCentered(g2, "按 P 继续游戏", Theme.font(Font.PLAIN, 14), Theme.MUTED,
+                centerX, (int) cardY + 98);
+        drawCentered(g2, "R 重开 · Q 返回菜单", Theme.font(Font.PLAIN, 12),
+                Theme.alpha(Theme.MUTED, 190), centerX, (int) cardY + 122);
+        drawCentered(g2, "等级 " + engine.level() + " · 消除 " + engine.lines() + " 行",
+                Theme.font(Font.PLAIN, 12), Theme.alpha(Theme.TEXT, 190), centerX, (int) cardY + 156);
+    }
 
-        g2.setFont(Theme.font(Font.BOLD, 28));
-        FontMetrics titleMetrics = g2.getFontMetrics();
-        g2.setColor(Theme.TEXT);
-        g2.drawString(title, centerX - titleMetrics.stringWidth(title) / 2, (int) cardY + 72);
-
-        g2.setFont(Theme.font(Font.PLAIN, 14));
-        FontMetrics hintMetrics = g2.getFontMetrics();
-        g2.setColor(Theme.MUTED);
-        g2.drawString(hint, centerX - hintMetrics.stringWidth(hint) / 2, (int) cardY + 102);
-
-        if (!paused) {
-            String score = "得分  " + engine.score();
-            g2.setFont(Theme.font(Font.BOLD, 17));
-            FontMetrics scoreMetrics = g2.getFontMetrics();
-            g2.setColor(Theme.GOLD);
-            g2.drawString(score, centerX - scoreMetrics.stringWidth(score) / 2, (int) cardY + 134);
-        } else {
-            String stats = "等级 " + engine.level() + "   ·   消除 " + engine.lines() + " 行";
-            g2.setFont(Theme.font(Font.PLAIN, 13));
-            FontMetrics statsMetrics = g2.getFontMetrics();
-            g2.setColor(Theme.MUTED);
-            g2.drawString(stats, centerX - statsMetrics.stringWidth(stats) / 2, (int) cardY + 132);
-        }
+    private void drawCentered(Graphics2D g2, String text, Font font, Color color,
+                              int centerX, int baseline) {
+        g2.setFont(font);
+        g2.setColor(color);
+        FontMetrics metrics = g2.getFontMetrics();
+        g2.drawString(text, centerX - metrics.stringWidth(text) / 2, baseline);
     }
 }

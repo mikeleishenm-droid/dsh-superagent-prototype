@@ -1,6 +1,7 @@
 package tetris;
 
 import tetris.game.GameEngine;
+import tetris.game.HighScoreStore;
 import tetris.ui.GameFrame;
 
 import javax.swing.SwingUtilities;
@@ -20,7 +21,8 @@ public final class Main {
             } catch (Exception ignored) {
                 // The custom painted UI does not depend on the look and feel.
             }
-            GameFrame frame = new GameFrame(new GameEngine(seed));
+            HighScoreStore scores = HighScoreStore.defaultStore();
+            GameFrame frame = new GameFrame(new GameEngine(seed), scores);
             frame.start();
         });
     }

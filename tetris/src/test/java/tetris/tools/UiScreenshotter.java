@@ -1,7 +1,9 @@
 package tetris.tools;
 
 import tetris.game.GameEngine;
+import tetris.game.GameMode;
 import tetris.game.GameState;
+import tetris.game.HighScoreStore;
 import tetris.ui.GameFrame;
 
 import javax.imageio.ImageIO;
@@ -40,12 +42,14 @@ public final class UiScreenshotter {
     public static void main(String[] args) throws Exception {
         Path outputDir = Path.of(args.length > 0 ? args[0] : "docs/screenshots");
         Files.createDirectories(outputDir);
+        Path profileDir = Files.createTempDirectory("tetris-capture");
+        HighScoreStore scores = new HighScoreStore(profileDir.resolve("highscores.properties"));
 
         AtomicReference<GameFrame> frameRef = new AtomicReference<>();
         AtomicReference<GameEngine> engineRef = new AtomicReference<>();
         SwingUtilities.invokeAndWait(() -> {
-            GameEngine engine = new GameEngine(SEED);
-            GameFrame frame = new GameFrame(engine);
+            GameEngine engine = new GameEngine(SEED); // starts in the menu
+            GameFrame frame = new GameFrame(engine, scores);
             frame.setLocation(WINDOW_X, WINDOW_Y);
             frame.start();
             frameRef.set(frame);
@@ -56,10 +60,16 @@ public final class UiScreenshotter {
         GameEngine engine = engineRef.get();
         Robot robot = new Robot();
         robot.setAutoDelay(8);
-        Thread.sleep(800);
+        Thread.sleep(900);
         clickInside(robot, frame);
 
         save(capture(frame), outputDir.resolve("start.png"));
+
+        tap(robot, KeyEvent.VK_ENTER);
+        Thread.sleep(350);
+        requireState(engine, GameState.RUNNING);
+        // Let the first piece fall one row, matching the baseline capture timing.
+        Thread.sleep(500);
 
         for (int i = 0; i < MID_GAME_PIECES; i++) {
             if (i == 3) {
@@ -88,15 +98,27 @@ public final class UiScreenshotter {
         tap(robot, KeyEvent.VK_P);
         Thread.sleep(250);
 
-        for (int i = 0; i < 120 && state(engine) != GameState.GAME_OVER; i++) {
+        for (int i = 0; i < 120 && state(engine) != GameState.FINISHED; i++) {
             tap(robot, KeyEvent.VK_SPACE);
             Thread.sleep(90);
         }
-        Thread.sleep(400);
-        requireState(engine, GameState.GAME_OVER);
+        Thread.sleep(500);
+        requireState(engine, GameState.FINISHED);
         save(capture(frame), outputDir.resolve("gameover.png"));
 
+        // Exercise the end-screen shortcuts: replay, pause and return to menu.
+        tap(robot, KeyEvent.VK_R);
+        Thread.sleep(400);
+        requireState(engine, GameState.RUNNING);
+        tap(robot, KeyEvent.VK_Q);
+        Thread.sleep(200);
+        requireState(engine, GameState.PAUSED);
+        tap(robot, KeyEvent.VK_Q);
+        Thread.sleep(300);
+        requireState(engine, GameState.MENU);
+
         System.out.println("Screenshots written to " + outputDir.toAbsolutePath());
+        System.out.println("Marathon best: " + scores.bestScore(GameMode.MARATHON));
         System.out.println("Final state: " + state(engine) + ", score=" + engine.score());
         System.exit(0);
     }

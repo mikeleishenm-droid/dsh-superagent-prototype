@@ -8,9 +8,9 @@ import java.util.Objects;
 import java.util.Random;
 
 /**
- * The Tetris rules: gravity, locking, line clears, scoring, hold and level
- * progression. The engine has no dependency on Swing so it can be driven by a
- * test or by any UI.
+ * The Tetris rules: gravity, locking, line clears, scoring, hold, game modes and
+ * level progression. The engine has no dependency on Swing so it can be driven
+ * by a test or by any UI.
  */
 public final class GameEngine {
 
@@ -18,7 +18,6 @@ public final class GameEngine {
     public static final int SPAWN_X = 3;
 
     public static final long LOCK_DELAY_MS = 500;
-    public static final long SOFT_DROP_INTERVAL_MS = 40;
 
     private static final int MAX_LOCK_RESETS = 15;
     private static final long BASE_DROP_INTERVAL_MS = 800;
@@ -27,6 +26,7 @@ public final class GameEngine {
     private static final int QUEUE_SIZE = 5;
     private static final int PREVIEW_SIZE = 3;
     private static final int[] LINE_SCORES = {0, 100, 300, 500, 800};
+    private static final int COMBO_POINTS = 50;
     private static final int SOFT_DROP_POINTS = 1;
     private static final int HARD_DROP_POINTS = 2;
 
@@ -36,13 +36,21 @@ public final class GameEngine {
 
     private GameListener listener = new GameListener() {
     };
-    private GameState state = GameState.RUNNING;
+    private GameMode mode;
+    private GameState state = GameState.MENU;
+    private FinishReason finishReason;
     private Piece current;
     private Tetromino held;
     private boolean holdUsed;
     private int score;
     private int lines;
-    private int level;
+    private int level = 1;
+    private int combo;
+    private int maxCombo;
+    private int tetrises;
+    private int piecesPlaced;
+    private boolean previousWasTetris;
+    private long elapsedMs;
     private long gravityElapsedMs;
     private long lockElapsedMs;
     private int lockResets;
@@ -57,7 +65,6 @@ public final class GameEngine {
 
     public GameEngine(Random random) {
         this.bag = new BagRandomizer(Objects.requireNonNull(random, "random"));
-        restart();
     }
 
     public void setListener(GameListener listener) {
@@ -67,6 +74,18 @@ public final class GameEngine {
 
     public Board board() {
         return board;
+    }
+
+    public GameMode mode() {
+        return mode;
+    }
+
+    public GameState state() {
+        return state;
+    }
+
+    public FinishReason finishReason() {
+        return finishReason;
     }
 
     public Piece current() {
@@ -81,10 +100,6 @@ public final class GameEngine {
         return holdUsed;
     }
 
-    public GameState state() {
-        return state;
-    }
-
     public int score() {
         return score;
     }
@@ -97,12 +112,39 @@ public final class GameEngine {
         return level;
     }
 
-    /** Rows cleared by the most recent lock, for UI feedback. */
-    public int lastClearCount() {
-        return lastClearCount;
+    public int combo() {
+        return combo;
     }
 
-    private int lastClearCount;
+    public int maxCombo() {
+        return maxCombo;
+    }
+
+    public int tetrises() {
+        return tetrises;
+    }
+
+    public int piecesPlaced() {
+        return piecesPlaced;
+    }
+
+    /** Milliseconds spent in the running state. */
+    public long elapsedMs() {
+        return elapsedMs;
+    }
+
+    /** Remaining time for timed modes, 0 otherwise. */
+    public long remainingMs() {
+        if (mode == null || !mode.isTimed()) {
+            return 0;
+        }
+        return Math.max(0, mode.timeLimitMs() - elapsedMs);
+    }
+
+    public GameResult result() {
+        return new GameResult(Objects.requireNonNull(mode, "mode"), score, lines, level,
+                elapsedMs, piecesPlaced, tetrises, maxCombo);
+    }
 
     /** The next pieces in spawn order, for the preview panel. */
     public List<Tetromino> nextPieces() {
@@ -143,28 +185,74 @@ public final class GameEngine {
         return current != null && board.collides(current.moved(0, 1));
     }
 
-    /** Starts a brand-new game. */
-    public void restart() {
+    /** Starts a fresh run in the given mode. */
+    public void startGame(GameMode mode) {
+        this.mode = Objects.requireNonNull(mode, "mode");
         board.reset();
         nextQueue.clear();
-        fillQueue();
         current = null;
         held = null;
         holdUsed = false;
         score = 0;
         lines = 0;
         level = 1;
-        lastClearCount = 0;
+        combo = 0;
+        maxCombo = 0;
+        tetrises = 0;
+        piecesPlaced = 0;
+        previousWasTetris = false;
+        elapsedMs = 0;
+        finishReason = null;
         state = GameState.RUNNING;
         resetDropTimers();
+        fillQueue();
         spawnNext();
     }
 
-    /** Advances time. Handles gravity and the lock delay. */
+    /** Restarts the current mode, if one is active. */
+    public void restart() {
+        if (mode != null) {
+            startGame(mode);
+        }
+    }
+
+    /** Clears the board and returns to the menu state. */
+    public void returnToMenu() {
+        board.reset();
+        nextQueue.clear();
+        mode = null;
+        current = null;
+        held = null;
+        holdUsed = false;
+        score = 0;
+        lines = 0;
+        level = 1;
+        combo = 0;
+        maxCombo = 0;
+        tetrises = 0;
+        piecesPlaced = 0;
+        previousWasTetris = false;
+        elapsedMs = 0;
+        finishReason = null;
+        resetDropTimers();
+        state = GameState.MENU;
+    }
+
+    /** Advances time. Handles the mode clock, gravity and the lock delay. */
     public void update(long deltaMs) {
         if (state != GameState.RUNNING || current == null || deltaMs <= 0) {
             return;
         }
+        if (mode.isTimed()) {
+            long remaining = mode.timeLimitMs() - elapsedMs;
+            if (remaining <= 0 || deltaMs >= remaining) {
+                elapsedMs = mode.timeLimitMs();
+                finish(FinishReason.TIME_UP);
+                return;
+            }
+        }
+        elapsedMs += deltaMs;
+
         if (isGrounded()) {
             lockElapsedMs += deltaMs;
             if (lockElapsedMs >= LOCK_DELAY_MS) {
@@ -206,13 +294,13 @@ public final class GameEngine {
 
     /** Moves down one row; awards soft-drop points when the player asks for it. */
     public boolean softDrop() {
-        if (!canAct() || !moveDown(true)) {
-            return false;
-        }
-        return true;
+        return canAct() && moveDown(true);
     }
 
     private boolean moveDown(boolean byPlayer) {
+        if (!canAct()) {
+            return false;
+        }
         Piece candidate = current.moved(0, 1);
         if (board.collides(candidate)) {
             return false;
@@ -281,7 +369,7 @@ public final class GameEngine {
         return true;
     }
 
-    /** Pauses a running game or resumes a paused one. Returns false on game over. */
+    /** Pauses a running game or resumes a paused one. */
     public boolean togglePause() {
         if (state == GameState.RUNNING) {
             state = GameState.PAUSED;
@@ -309,16 +397,34 @@ public final class GameEngine {
 
     private void lockCurrent() {
         board.lock(current);
+        piecesPlaced++;
         List<Integer> cleared = board.clearFullLines();
-        if (!cleared.isEmpty()) {
-            int count = cleared.size();
-            lines += count;
-            score += lineClearScore(count, level);
-            level = lines / 10 + 1;
-            lastClearCount = count;
-            listener.onLinesCleared(count, cleared);
+        if (cleared.isEmpty()) {
+            combo = 0;
+            previousWasTetris = false;
         } else {
-            lastClearCount = 0;
+            int count = cleared.size();
+            combo++;
+            maxCombo = Math.max(maxCombo, combo);
+            boolean backToBack = count >= 4 && previousWasTetris;
+            int base = lineClearScore(count, level);
+            int points = backToBack ? base * 3 / 2 : base;
+            if (combo >= 2) {
+                points += COMBO_POINTS * (combo - 1) * level;
+            }
+            score += points;
+            lines += count;
+            if (count >= 4) {
+                tetrises++;
+            }
+            previousWasTetris = count >= 4;
+            level = lines / 10 + 1;
+            listener.onLinesCleared(new ClearResult(count, points, combo, backToBack));
+
+            if (mode.isTargetMode() && lines >= mode.targetLines()) {
+                finish(FinishReason.TARGET_REACHED);
+                return;
+            }
         }
         spawnNext();
     }
@@ -338,9 +444,17 @@ public final class GameEngine {
         current = Piece.spawn(type);
         resetDropTimers();
         if (board.collides(current)) {
-            state = GameState.GAME_OVER;
-            listener.onGameOver();
+            finish(FinishReason.GAME_OVER);
         }
+    }
+
+    private void finish(FinishReason reason) {
+        if (state == GameState.FINISHED) {
+            return;
+        }
+        state = GameState.FINISHED;
+        finishReason = reason;
+        listener.onRunFinished(reason);
     }
 
     private void resetDropTimers() {
