@@ -229,6 +229,18 @@ class GameEngineTest {
     }
 
     @Test
+    void previewStaysPopulatedWhilePlaying() {
+        GameEngine engine = new GameEngine(SEED);
+        for (int i = 0; i < 6 && engine.state() != GameState.GAME_OVER; i++) {
+            assertEquals(3, engine.nextPieces().size(), "preview before drop " + i);
+            engine.hardDrop();
+            if (engine.state() != GameState.GAME_OVER) {
+                assertEquals(3, engine.nextPieces().size(), "preview after drop " + i);
+            }
+        }
+    }
+
+    @Test
     void nextPiecesAreShownInSpawnOrder() {
         GameEngine engine = new GameEngine(SEED);
         List<Tetromino> preview = engine.nextPieces();

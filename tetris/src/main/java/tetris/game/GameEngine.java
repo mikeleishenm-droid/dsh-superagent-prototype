@@ -329,6 +329,7 @@ public final class GameEngine {
             fillQueue();
             type = nextQueue.pollFirst();
         }
+        fillQueue();
         spawnPiece(type);
         holdUsed = false;
     }

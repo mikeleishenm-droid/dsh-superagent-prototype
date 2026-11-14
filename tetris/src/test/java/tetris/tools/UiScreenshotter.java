@@ -5,10 +5,10 @@ import tetris.game.GameState;
 import tetris.ui.GameFrame;
 
 import javax.imageio.ImageIO;
+import javax.swing.JComponent;
 import javax.swing.SwingUtilities;
-import java.awt.Dimension;
+import java.awt.Graphics2D;
 import java.awt.Point;
-import java.awt.Rectangle;
 import java.awt.Robot;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
@@ -59,7 +59,7 @@ public final class UiScreenshotter {
         Thread.sleep(800);
         clickInside(robot, frame);
 
-        save(capture(robot, frame), outputDir.resolve("start.png"));
+        save(capture(frame), outputDir.resolve("start.png"));
 
         for (int i = 0; i < MID_GAME_PIECES; i++) {
             if (i == 3) {
@@ -78,12 +78,12 @@ public final class UiScreenshotter {
             Thread.sleep(180);
         }
         Thread.sleep(400);
-        save(capture(robot, frame), outputDir.resolve("midgame.png"));
+        save(capture(frame), outputDir.resolve("midgame.png"));
 
         tap(robot, KeyEvent.VK_P);
         Thread.sleep(300);
         requireState(engine, GameState.PAUSED);
-        save(capture(robot, frame), outputDir.resolve("paused.png"));
+        save(capture(frame), outputDir.resolve("paused.png"));
 
         tap(robot, KeyEvent.VK_P);
         Thread.sleep(250);
@@ -94,7 +94,7 @@ public final class UiScreenshotter {
         }
         Thread.sleep(400);
         requireState(engine, GameState.GAME_OVER);
-        save(capture(robot, frame), outputDir.resolve("gameover.png"));
+        save(capture(frame), outputDir.resolve("gameover.png"));
 
         System.out.println("Screenshots written to " + outputDir.toAbsolutePath());
         System.out.println("Final state: " + state(engine) + ", score=" + engine.score());
@@ -115,10 +115,26 @@ public final class UiScreenshotter {
         robot.delay(18);
     }
 
-    private static BufferedImage capture(Robot robot, GameFrame frame) {
-        Point location = frame.getContentPane().getLocationOnScreen();
-        Dimension size = frame.getContentPane().getSize();
-        return robot.createScreenCapture(new Rectangle(location, size));
+    /**
+     * Captures what the live window renders. Painting the real content pane is
+     * independent of the window server's placement of the window, so the
+     * evidence is reproducible under Xvfb.
+     */
+    private static BufferedImage capture(GameFrame frame) throws Exception {
+        AtomicReference<BufferedImage> result = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() -> {
+            JComponent content = (JComponent) frame.getContentPane();
+            BufferedImage image = new BufferedImage(
+                    content.getWidth(), content.getHeight(), BufferedImage.TYPE_INT_RGB);
+            Graphics2D graphics = image.createGraphics();
+            try {
+                content.paint(graphics);
+            } finally {
+                graphics.dispose();
+            }
+            result.set(image);
+        });
+        return result.get();
     }
 
     private static void save(BufferedImage image, Path path) throws IOException {
