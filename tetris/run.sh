@@ -15,5 +15,5 @@ fi
 
 rm -rf build/classes
 mkdir -p build/classes
-find src/main/java -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 -release 17 -d build/classes
+find src/main/java -name '*.java' -print0 | xargs -0 javac -encoding UTF-8 --release 17 -d build/classes
 exec java -cp build/classes tetris.Main "$@"
